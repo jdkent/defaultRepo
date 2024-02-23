@@ -118,7 +118,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
         )
         sleep(2 + random.expovariate(1. / 0.5))
     except:
-        print("Timed out waiting for page to load.")
+        print("Timed out waiting for login page to load")
     # Open the webpage with the table
     if configs is None:
         configs = list(CONFIGS.values())
@@ -154,7 +154,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                             EC.presence_of_element_located((By.XPATH, cell_xpath))
                         )
                     except:
-                        print("Timed out waiting for page to load.")
+                        print("Timed out waiting for calendar page to load.")
                         continue
                 # Find the cell for the reservation date
                 if use_selector:
@@ -190,7 +190,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                     )
                     driver.back()
                 except:
-                    print("Timed out waiting for page to load.")
+                    print("Timed out waiting for booking page to load.")
                     # unselect date
                     cell.click()
                     continue
