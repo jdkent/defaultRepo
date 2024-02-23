@@ -43,7 +43,7 @@ def handler(event, context):
     start_date = event.get("start_date")
     end_date = event.get("end_date")
     config_key = event.get("config")
-    max_time = event.get("max_time", 500) # max time in seconds to run
+    max_time = event.get("max_time", 500)  # max time in seconds to run
 
     # try to find bookings for 5 minutes before giving up
     time_now = time()
@@ -57,6 +57,10 @@ def handler(event, context):
 
 
 def get_booking_started(start_date, end_date, email, password, config_key=None):
+    # keep track of timeouts to see if we need to restart the browser
+    TIMEOUT_LIMIT = 5
+    num_timeouts = 0
+
     start_date = datetime.strptime(start_date, time_format)
     end_date = datetime.strptime(end_date, time_format)
     found_bookings = False
@@ -81,7 +85,6 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
     options.add_argument('--disable-popup-blocking')
     # disable extensions
     options.add_argument('--disable-extensions')
-
     # disable sandbox mode
     options.add_argument('--no-sandbox')
 
@@ -126,8 +129,26 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
 
     # login
     driver.get("https://www.recreation.gov/")
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "ga-global-nav-log-in-link"))
+        )
+    except:
+        print("Timed out waiting for login link to load")
+        driver.quit()
+        return False
+
     login_button = driver.find_element(By.ID, "ga-global-nav-log-in-link")
     login_button.click()
+
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "email"))
+        )
+    except:
+        print("Timed out waiting for login page to load")
+        driver.quit()
+        return False
 
     email_field = driver.find_element(By.ID, "email")
     email_field.clear()
@@ -148,6 +169,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
         sleep(2 + random.expovariate(1. / 0.5))
     except:
         print("Timed out waiting for home page to load")
+        num_timeouts += 1
     # Open the webpage with the table
     if config_key is None:
         config = list(CONFIGS.values())[0]
@@ -169,6 +191,11 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
 
         # cells = driver.find_elements(By.CLASS_NAME, "rec-availability-date"))
         for cell_col in range(min_cell_col, max_cell_col):
+            if num_timeouts >= TIMEOUT_LIMIT:
+                print("Too many timeouts, restarting browser")
+                driver.quit()
+                return found_bookings
+
             cell_selector = config["date_css_selector"].format(cell_col=cell_col)
             cell_xpath = config["date_xpath_selector"].format(cell_col=cell_col)
             use_selector = False
@@ -184,6 +211,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
                     )
                 except:
                     print("Timed out waiting for calendar page to load.")
+                    num_timeouts += 1
                     continue
             # Find the cell for the reservation date
             if use_selector:
@@ -231,7 +259,8 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
                 if error_field_text:
                     print(f"Error: {error_field_text}")
                 else:
-                    print(f"Not a bad fingerprint error, something else")
+                    num_timeouts += 1
+                    print("Not a bad fingerprint error, something else")
                 # unselect date
                 cell.click()
                 continue
@@ -265,4 +294,4 @@ if __name__ == "__main__":
     email = os.environ.get("REC_EMAIL")
     password = os.environ.get("REC_PASSWORD")
     config_key = "dinosaur"
-    get_booking_started("2024-03-01", "2024-03-05", email, password, config_key)
+    get_booking_started("2024-02-26", "2024-03-30", email, password, config_key)
