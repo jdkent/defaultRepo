@@ -1,6 +1,6 @@
 import os
 import random
-from time import sleep
+from time import sleep, time
 from datetime import datetime, timedelta
 from tempfile import mkdtemp
 
@@ -42,15 +42,24 @@ def handler(event, context):
     password = os.environ.get("REC_PASSWORD")
     start_date = event.get("start_date")
     end_date = event.get("end_date")
-    configs = event.get("configs")
+    config_key = event.get("config")
+    max_time = event.get("max_time", 500) # max time in seconds to run
 
-    get_booking_started(
-        start_date, end_date, email, password, configs)
+    # try to find bookings for 5 minutes before giving up
+    time_now = time()
+    time_end = time_now + max_time
+    while time_now < time_end:
+        any_bookings = get_booking_started(
+            start_date, end_date, email, password, config_key)
+        if any_bookings:
+            break
+        time_now = time()
 
 
-def get_booking_started(start_date, end_date, email, password, configs=None):
+def get_booking_started(start_date, end_date, email, password, config_key=None):
     start_date = datetime.strptime(start_date, time_format)
     end_date = datetime.strptime(end_date, time_format)
+    found_bookings = False
 
     user_agents = [
         # Add your list of user agents here
@@ -79,8 +88,8 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
     # disable shared memory usage
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument("--headless=new")
-    options.add_argument("window-size=1920,1080")
-
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument('--ignore-certificate-errors')
     options.add_argument("--disable-gpu")
     options.add_argument("--single-process")
     options.add_argument("--disable-dev-tools")
@@ -90,7 +99,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
     options.add_argument(f"--disk-cache-dir={mkdtemp()}")
     # user agent
     user_agent = random.choice(user_agents)
-    options.add_argument(f'user-agent={user_agent}')
+    options.add_argument(f'--user-agent={user_agent}')
 
     in_docker = os.environ.get('AM_I_IN_A_DOCKER_CONTAINER', False)
     kwargs = {"options": options}
@@ -123,13 +132,13 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
     email_field = driver.find_element(By.ID, "email")
     email_field.clear()
     email_field.send_keys(email)
-
+    sleep(random.expovariate(1. / 0.5))
     password_field = driver.find_element(By.ID, "rec-acct-sign-in-password")
     password_field.clear()
     password_field.send_keys(password)
 
     login_button = driver.find_element(By.CLASS_NAME, "rec-acct-sign-in-btn")
-
+    sleep(random.expovariate(1. / 0.5))
     login_button.click()
 
     try:
@@ -138,123 +147,122 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
         )
         sleep(2 + random.expovariate(1. / 0.5))
     except:
-        print("Timed out waiting for login page to load")
+        print("Timed out waiting for home page to load")
     # Open the webpage with the table
-    if configs is None:
-        configs = list(CONFIGS.values())
+    if config_key is None:
+        config = list(CONFIGS.values())[0]
     else:
-        configs = [CONFIGS[config] for config in configs]
-    for config in configs:
-        current_date = start_date
-        while current_date <= end_date:
-            driver.delete_all_cookies()
-            driver.get(f"https://www.recreation.gov/permits/{config['permit_id']}/registration/detailed-availability?date={current_date.strftime(time_format)}")
+        config = CONFIGS[config_key]
 
-            # loop through cell columns
-            min_cell_col = config["min_date_col"]
-            max_cell_col = min_cell_col + 10
-            date_diff = end_date - current_date
+    # go through the dates to find availability
+    current_date = start_date
+    while current_date <= end_date:
+        driver.get(f"https://www.recreation.gov/permits/{config['permit_id']}/registration/detailed-availability?date={current_date.strftime(time_format)}")
 
-            if date_diff.days < 10:
-                max_cell_col = date_diff.days + min_cell_col
+        # loop through cell columns
+        min_cell_col = config["min_date_col"]
+        max_cell_col = min_cell_col + 10
+        date_diff = end_date - current_date
 
-            # cells = driver.find_elements(By.CLASS_NAME, "rec-availability-date"))
-            for cell_col in range(min_cell_col, max_cell_col):
-                cell_selector = config["date_css_selector"].format(cell_col=cell_col)
-                cell_xpath = config["date_xpath_selector"].format(cell_col=cell_col)
-                use_selector = False
+        if date_diff.days < 10:
+            max_cell_col = date_diff.days + min_cell_col
+
+        # cells = driver.find_elements(By.CLASS_NAME, "rec-availability-date"))
+        for cell_col in range(min_cell_col, max_cell_col):
+            cell_selector = config["date_css_selector"].format(cell_col=cell_col)
+            cell_xpath = config["date_xpath_selector"].format(cell_col=cell_col)
+            use_selector = False
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, cell_selector))
+                )
+                use_selector = True
+            except:
                 try:
                     WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, cell_selector))
+                        EC.presence_of_element_located((By.XPATH, cell_xpath))
                     )
-                    use_selector = True
                 except:
-                    try:
-                        WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.XPATH, cell_xpath))
-                        )
-                    except:
-                        print("Timed out waiting for calendar page to load.")
-                        continue
-                # Find the cell for the reservation date
-                if use_selector:
-                    cell = driver.find_element(By.CSS_SELECTOR, cell_selector)
+                    print("Timed out waiting for calendar page to load.")
+                    continue
+            # Find the cell for the reservation date
+            if use_selector:
+                cell = driver.find_element(By.CSS_SELECTOR, cell_selector)
+            else:
+                cell = driver.find_element(By.XPATH, cell_xpath)
+
+            # Get the initial state of the cell (if it's selected or not)
+            initial_state = cell.get_attribute("aria-label")
+            if "available" not in initial_state.lower() or "unavailable" in initial_state.lower():
+                continue
+
+            # Click the cell to simulate selecting it
+            cell.click()
+
+            # Get the updated state of the cell after clicking
+            updated_state = cell.get_attribute("aria-label")
+
+            # Check if the state has changed as expected
+            if "selected" not in updated_state.lower():
+                continue
+
+            # try to click the "Book" button
+            book_button = driver.find_element(By.CSS_SELECTOR, "#per-availability-main > div > div.sarsa-box > div:nth-child(4) > div > div > div > button")
+            # could not continue with booking
+            if "disabled" in book_button.get_attribute("class").lower():
+                continue
+            # add item to booking
+            book_button.click()
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "first_name"))
+                )
+                driver.back()
+                found_bookings = True
+            except:
+                print("Timed out waiting for booking page to load.")
+                error_field_text = None
+                try:
+                    error_field = driver.find_element(By.CSS_SELECTOR, BAD_FINGRPRINT_CSS_SELECTOR)
+                    error_field_text = error_field.text
+                except:
+                    pass
+
+                if error_field_text:
+                    print(f"Error: {error_field_text}")
                 else:
-                    cell = driver.find_element(By.XPATH, cell_xpath)
-
-                # Get the initial state of the cell (if it's selected or not)
-                initial_state = cell.get_attribute("aria-label")
-                if "available" not in initial_state.lower() or "unavailable" in initial_state.lower():
-                    continue
-
-                # Click the cell to simulate selecting it
+                    print(f"Not a bad fingerprint error, something else")
+                # unselect date
                 cell.click()
+                continue
 
-                # Get the updated state of the cell after clicking
-                updated_state = cell.get_attribute("aria-label")
+        current_date = current_date + timedelta(days=10)
 
-                # Check if the state has changed as expected
-                if "selected" not in updated_state.lower():
-                    continue
+        # GO TO THE NEXT PAGE TWICE TO GET FRESH IDS
+        next_page_css_selector = "#per-availability-main > div > div.sarsa-box > div.sarsa-stack.md > div > div:nth-child(2) > div > div > button.sarsa-button.ml-1.mr-2.sarsa-button-link.sarsa-button-xs"
 
-                # try to click the "Book" button
-                book_button = driver.find_element(By.CSS_SELECTOR, "#per-availability-main > div > div.sarsa-box > div:nth-child(4) > div > div > div > button")
-                # could not continue with booking
-                if "disabled" in book_button.get_attribute("class").lower():
-                    continue
-                # add item to booking
-                book_button.click()
-                try:
-                    WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located((By.ID, "first_name"))
-                    )
-                    driver.back()
-                except:
-                    print("Timed out waiting for booking page to load.")
-                    error_field_text = None
-                    try:
-                        error_field = driver.find_element(By.CSS_SELECTOR, BAD_FINGRPRINT_CSS_SELECTOR)
-                        error_field_text = error_field.text
-                    except:
-                        pass
+        try:
+            WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, next_page_css_selector))
+            )
+        except:
+            print("Timed out waiting for next page to load.")
+            break
 
-                    if error_field_text:
-                        print(f"Error: {error_field_text}")
-                    else:
-                        print(f"Not a bad fingerprint error, something else")
-                    # unselect date
-                    cell.click()
-                    continue
-
-            # jump field will be the death of me
-            # clear jump-date field
-            # jump_date_field = driver.find_element(By.ID, "jump-date")
-            # jump_date_field.clear()
-            current_date = current_date + timedelta(days=10)
-            # driver.execute_script(
-            #     "arguments[0].value = arguments[1];",
-            #     jump_date_field,
-            #     current_date.strftime(jump_date_format)
-            # )
-            # CHANGING TABS INSTEAD
-            # driver.execute_script("window.open('about:blank', '_blank');")
-            # driver.close()
-            # driver.switch_to.window(driver.window_handles[-1])
-            ### SHUTTING DOWN THE DRIVER
-            #driver.quit()
-            #driver = webdriver.Chrome()
-            # GO TO THE NEXT PAGE TWICE TO GET FRESH IDS
-            next_page = driver.find_element(By.CSS_SELECTOR, "#per-availability-main > div > div.sarsa-box > div.sarsa-stack.md > div > div:nth-child(2) > div > div > button.sarsa-button.ml-1.mr-2.sarsa-button-link.sarsa-button-xs")
-            next_page.click()
-            sleep(0.3 + random.expovariate(1. / 0.5))
-            next_page.click()
-            sleep(0.3 + random.expovariate(1. / 0.5))
+        next_page = driver.find_element(By.CSS_SELECTOR, next_page_css_selector)
+        next_page.click()
+        sleep(0.2 + random.expovariate(1. / 0.5))
+        next_page.click()
+        sleep(0.1 + random.expovariate(1. / 0.5))
     # Close the browser
     driver.quit()
+
+    # return whether bookings were found
+    return found_bookings
 
 
 if __name__ == "__main__":
     email = os.environ.get("REC_EMAIL")
     password = os.environ.get("REC_PASSWORD")
-    configs = ["dinosaur"]
-    get_booking_started("2024-03-01", "2024-03-05", email, password, configs)
+    config_key = "dinosaur"
+    get_booking_started("2024-03-01", "2024-03-05", email, password, config_key)
