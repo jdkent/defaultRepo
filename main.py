@@ -1,15 +1,16 @@
 import os
 import random
+from time import sleep
+from datetime import datetime, timedelta
+from tempfile import mkdtemp
+
 from selenium import webdriver
 from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
-from time import sleep
-from datetime import datetime, timedelta
-import undetected_chromedriver as uc
+
 
 time_format = "%Y-%m-%d"
 jump_date_format = "%m/%d/%Y"
@@ -43,7 +44,8 @@ def handler(event, context):
     end_date = event.get("end_date")
     configs = event.get("configs")
 
-    get_booking_started(start_date, end_date, email, password, configs)
+    get_booking_started(
+        start_date, end_date, email, password, configs)
 
 
 def get_booking_started(start_date, end_date, email, password, configs=None):
@@ -78,10 +80,28 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument("--headless=new")
     options.add_argument("window-size=1920,1080")
+
+    options.add_argument("--disable-gpu")
+    options.add_argument("--single-process")
+    options.add_argument("--disable-dev-tools")
+    options.add_argument("--no-zygote")
+    options.add_argument(f"--user-data-dir={mkdtemp()}")
+    options.add_argument(f"--data-path={mkdtemp()}")
+    options.add_argument(f"--disk-cache-dir={mkdtemp()}")
     # user agent
     user_agent = random.choice(user_agents)
     options.add_argument(f'user-agent={user_agent}')
-    driver = webdriver.Chrome(options=options)
+
+    in_docker = os.environ.get('AM_I_IN_A_DOCKER_CONTAINER', False)
+    kwargs = {"options": options}
+
+    if in_docker:
+        print("Running in Docker!")
+        service = webdriver.ChromeService("/opt/chromedriver")
+        options.binary_location = '/opt/chrome/chrome'
+        kwargs["service"] = service
+
+    driver = webdriver.Chrome(**kwargs)
 
     # Change the property value of the navigator for webdriver to undefined
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
