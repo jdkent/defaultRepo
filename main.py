@@ -11,7 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 
-
+BAD_FINGRPRINT_CSS_SELECTOR = "#per-availability-main > div > div.per-availability-notification > div"
 time_format = "%Y-%m-%d"
 jump_date_format = "%m/%d/%Y"
 CONFIGS = {
@@ -211,6 +211,17 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                     driver.back()
                 except:
                     print("Timed out waiting for booking page to load.")
+                    error_field_text = None
+                    try:
+                        error_field = driver.find_element(By.CSS_SELECTOR, BAD_FINGRPRINT_CSS_SELECTOR)
+                        error_field_text = error_field.text
+                    except:
+                        pass
+
+                    if error_field_text:
+                        print(f"Error: {error_field_text}")
+                    else:
+                        print(f"Not a bad fingerprint error, something else")
                     # unselect date
                     cell.click()
                     continue
