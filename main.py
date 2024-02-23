@@ -1,5 +1,7 @@
 import os
+import random
 from selenium import webdriver
+from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -7,6 +9,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from time import sleep
 from datetime import datetime, timedelta
+import undetected_chromedriver as uc
 
 time_format = "%Y-%m-%d"
 jump_date_format = "%m/%d/%Y"
@@ -25,15 +28,72 @@ CONFIGS = {
     },
     "dinosaur": {
         "permit_id": "250014",
+        "date_css_selector": "#per-availability-main > div > div.sarsa-box > div.per-availability-table-container > div.rec-grid-grid.detailed-availability-grid-new > div.per-availability-table > div:nth-child(2) > div:nth-child({cell_col}) > div > button",
+        "date_xpath_selector": "/html/body/div[1]/div/div[4]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[2]/div[{cell_col}]/div/button",
+        "min_date_col": 2,
     }
 }
+
+
+# make it compatible with AWS Lambda
+def handler(event, context):
+    email = os.environ.get("REC_EMAIL")
+    password = os.environ.get("REC_PASSWORD")
+    start_date = event.get("start_date")
+    end_date = event.get("end_date")
+    configs = event.get("configs")
+
+    get_booking_started(start_date, end_date, email, password, configs)
 
 
 def get_booking_started(start_date, end_date, email, password, configs=None):
     start_date = datetime.strptime(start_date, time_format)
     end_date = datetime.strptime(end_date, time_format)
+
+    user_agents = [
+        # Add your list of user agents here
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+    ]
     # Create a new instance of the Firefox driver
-    driver = webdriver.Chrome()
+    options = Options()
+
+    # disable the AutomationControlled feature of Blink rendering engine
+    options.add_argument('--disable-blink-features=AutomationControlled')
+
+    # disable pop-up blocking
+    options.add_argument('--disable-popup-blocking')
+    # disable extensions
+    options.add_argument('--disable-extensions')
+
+    # disable sandbox mode
+    options.add_argument('--no-sandbox')
+
+    # disable shared memory usage
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument("--headless=new")
+    options.add_argument("window-size=1920,1080")
+    # user agent
+    user_agent = random.choice(user_agents)
+    options.add_argument(f'user-agent={user_agent}')
+    driver = webdriver.Chrome(options=options)
+
+    # Change the property value of the navigator for webdriver to undefined
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    stealth(
+        driver,
+        languages=["en-US", "en"],
+        vendor="Google Inc.",
+        platform="Win32",
+        webgl_vendor="Intel Inc.",
+        renderer="Intel Iris OpenGL Engine",
+        fix_hairline=True,
+    )
 
     # login
     driver.get("https://www.recreation.gov/")
@@ -56,7 +116,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.ID, "rec-sr-content"))
         )
-        sleep(2)
+        sleep(2 + random.expovariate(1. / 0.5))
     except:
         print("Timed out waiting for page to load.")
     # Open the webpage with the table
@@ -101,10 +161,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                     cell = driver.find_element(By.CSS_SELECTOR, cell_selector)
                 else:
                     cell = driver.find_element(By.XPATH, cell_xpath)
-                # /html/body/div[1]/div/div[3]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[1]/div[11]/div/button
-                # /html/body/div[1]/div/div[3]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[1]/div[2]/div/button
-                # "/html/body/div[1]/div/div[4]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[1]/div[6]/div/button"
-                # "/html/body/div[1]/div/div[4]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[2]/div[6]/div/button"
+
                 # Get the initial state of the cell (if it's selected or not)
                 initial_state = cell.get_attribute("aria-label")
                 if "available" not in initial_state.lower() or "unavailable" in initial_state.lower():
@@ -121,7 +178,7 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                     continue
 
                 # try to click the "Book" button
-                book_button = driver.find_element(By.XPATH, "/html/body/div[1]/div/div[3]/div/div/div[1]/div/div[4]/div[4]/div/div/div/button")
+                book_button = driver.find_element(By.CSS_SELECTOR, "#per-availability-main > div > div.sarsa-box > div:nth-child(4) > div > div > div > button")
                 # could not continue with booking
                 if "disabled" in book_button.get_attribute("class").lower():
                     continue
@@ -134,6 +191,8 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
                     driver.back()
                 except:
                     print("Timed out waiting for page to load.")
+                    # unselect date
+                    cell.click()
                     continue
 
             # jump field will be the death of me
@@ -156,9 +215,9 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
             # GO TO THE NEXT PAGE TWICE TO GET FRESH IDS
             next_page = driver.find_element(By.CSS_SELECTOR, "#per-availability-main > div > div.sarsa-box > div.sarsa-stack.md > div > div:nth-child(2) > div > div > button.sarsa-button.ml-1.mr-2.sarsa-button-link.sarsa-button-xs")
             next_page.click()
-            sleep(0.3)
+            sleep(0.3 + random.expovariate(1. / 0.5))
             next_page.click()
-            sleep(0.3)
+            sleep(0.3 + random.expovariate(1. / 0.5))
     # Close the browser
     driver.quit()
 
@@ -166,5 +225,5 @@ def get_booking_started(start_date, end_date, email, password, configs=None):
 if __name__ == "__main__":
     email = os.environ.get("REC_EMAIL")
     password = os.environ.get("REC_PASSWORD")
-    configs = ["desolation"]
-    get_booking_started("2024-03-01", "2024-03-11", email, password, configs)
+    configs = ["dinosaur"]
+    get_booking_started("2024-03-01", "2024-03-05", email, password, configs)
