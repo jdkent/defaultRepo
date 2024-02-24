@@ -48,9 +48,20 @@ def handler(event, context):
     # try to find bookings for 5 minutes before giving up
     time_now = time()
     time_end = time_now + max_time
+
+    # tracker for early exits
+    early_exits = 0
+    EARLY_EXIT_THRESHOLD = 3
     while time_now < time_end:
-        any_bookings = get_booking_started(
+        if early_exits >= EARLY_EXIT_THRESHOLD:
+            print("Too many early exits, sleeping for a few seconds")
+            sleep(5)
+            early_exits = 0
+
+        any_bookings, early_exit = get_booking_started(
             start_date, end_date, email, password, config_key)
+        if early_exit:
+            early_exits += 1
         if any_bookings:
             break
         time_now = time()
@@ -136,7 +147,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
     except:
         print("Timed out waiting for login link to load")
         driver.quit()
-        return False
+        return False, True
 
     login_button = driver.find_element(By.ID, "ga-global-nav-log-in-link")
     login_button.click()
@@ -148,7 +159,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
     except:
         print("Timed out waiting for login page to load")
         driver.quit()
-        return False
+        return False, True
 
     email_field = driver.find_element(By.ID, "email")
     email_field.clear()
@@ -194,7 +205,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
             if num_timeouts >= TIMEOUT_LIMIT:
                 print("Too many timeouts, restarting browser")
                 driver.quit()
-                return found_bookings
+                return found_bookings, True
 
             cell_selector = config["date_css_selector"].format(cell_col=cell_col)
             cell_xpath = config["date_xpath_selector"].format(cell_col=cell_col)
@@ -287,7 +298,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None):
     driver.quit()
 
     # return whether bookings were found
-    return found_bookings
+    return found_bookings, False
 
 
 if __name__ == "__main__":
