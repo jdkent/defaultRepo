@@ -308,7 +308,8 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
 
                     if error_field_text:
                         print(f"Error: {error_field_text}")
-                        if "You are allowed to hold 1 permit(s) at a time." in error_field_text:
+                        if ("You are allowed to hold 1 permit(s) at a time." in error_field_text
+                                or "You must really like this location!" in error_field_text):
                             found_bookings = True
                             break
                     else:
