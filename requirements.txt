@@ -1,2 +1,4 @@
+boto3
 selenium-stealth~=1.0.6
 setuptools
+pytz

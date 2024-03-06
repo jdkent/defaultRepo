@@ -1,9 +1,11 @@
 import os
+import boto3
 import random
 from time import sleep, time
 from datetime import datetime, timedelta
 from tempfile import mkdtemp
 
+import pytz
 from selenium import webdriver
 from selenium_stealth import stealth
 from selenium.webdriver.common.by import By
@@ -20,20 +22,26 @@ CONFIGS = {
         "date_css_selector": "#per-availability-main > div > div.sarsa-box > div.per-availability-table-container > div.rec-grid-grid.detailed-availability-grid-new > div:nth-child(2) > div > div:nth-child({cell_col}) > div > button",
         "date_xpath_selector": "/html/body/div[1]/div/div[3]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div/div[{cell_col}]/div/button",
         "min_date_col": 2,
+        "dates": "2024-7-1/2/3/4"
     },
     "desolation": {
         "permit_id": "233393",
         "date_css_selector": "#per-availability-main > div > div.sarsa-box > div.per-availability-table-container > div.rec-grid-grid.detailed-availability-grid-new.has-area-data > div:nth-child(2) > div > div:nth-child({cell_col}) > div > button",
         "date_xpath_selector": "/html/body/div[1]/div/div[3]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div/div[{cell_col}]/div/button",
         "min_date_col": 3,
+        "dates": "2024-7-1/2/3/4"
     },
     "dinosaur": {
         "permit_id": "250014",
         "date_css_selector": "#per-availability-main > div > div.sarsa-box > div.per-availability-table-container > div.rec-grid-grid.detailed-availability-grid-new > div.per-availability-table > div:nth-child(2) > div:nth-child({cell_col}) > div > button",
         "date_xpath_selector": "/html/body/div[1]/div/div[4]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div[2]/div[{cell_col}]/div/button",
         "min_date_col": 2,
-    }
+        "dates": "2024-06-23-24-25",
+    },
+    "salmon-middle-fork": "2024-06-23/24/25",
 }
+
+BUCKET_NAME = "debucketforpng"
 
 
 # make it compatible with AWS Lambda
@@ -44,6 +52,8 @@ def handler(event, context):
     end_date = event.get("end_date")
     config_key = event.get("config")
     max_time = event.get("max_time", 500)  # max time in seconds to run
+    trigger_time = event.get("trigger_time", "08:00:00")  # trigger time in HH:MM:SS
+    trigger_time_zone = event.get("trigger_time_zone", "America/Denver")  # trigger time zone
 
     # try to find bookings for 5 minutes before giving up
     time_now = time()
@@ -55,11 +65,18 @@ def handler(event, context):
     while time_now < time_end:
         if early_exits >= EARLY_EXIT_THRESHOLD:
             print("Too many early exits, sleeping for a few seconds")
-            sleep(5)
+            sleep(30)
             early_exits = 0
         function_max_time = time_end - time_now
         any_bookings, early_exit = get_booking_started(
-            start_date, end_date, email, password, config_key, function_max_time
+            start_date,
+            end_date,
+            email,
+            password,
+            config_key,
+            function_max_time,
+            trigger_time,
+            trigger_time_zone,
         )
         if early_exit:
             early_exits += 1
@@ -68,7 +85,16 @@ def handler(event, context):
         time_now = time()
 
 
-def get_booking_started(start_date, end_date, email, password, config_key=None, max_time=500):
+def get_booking_started(
+    start_date,
+    end_date,
+    email,
+    password,
+    config_key=None,
+    max_time=500,
+    trigger_time="08:00:00",
+    trigger_time_zone="America/Denver",
+):
     # keep track of timeouts to see if we need to restart the browser
     TIMEOUT_LIMIT = 5
     num_timeouts = 0
@@ -99,6 +125,8 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
     options.add_argument('--disable-extensions')
     # disable sandbox mode
     options.add_argument('--no-sandbox')
+    # disable cache (did not help with 429)
+    # options.add_argument('--disable-cache')
 
     # disable shared memory usage
     options.add_argument('--disable-dev-shm-usage')
@@ -147,6 +175,10 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
         )
     except:
         print("Timed out waiting for login link to load")
+        s3 = boto3.client('s3')
+        fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_login_link_screenshot.png"
+        driver.save_screenshot("/tmp/" + fname)
+        s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
         driver.quit()
         return False, True
 
@@ -159,6 +191,10 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
         )
     except:
         print("Timed out waiting for login page to load")
+        s3 = boto3.client('s3')
+        fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_login_page_screenshot.png"
+        driver.save_screenshot("/tmp/" + fname)
+        s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
         driver.quit()
         return False, True
 
@@ -181,6 +217,10 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
         sleep(2 + random.expovariate(1. / 0.5))
     except:
         print("Timed out waiting for home page to load")
+        s3 = boto3.client('s3')
+        fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_home_page_screenshot.png"
+        driver.save_screenshot( "/tmp/" + fname)
+        s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
         num_timeouts += 1
     # Open the webpage with the table
     if config_key is None:
@@ -196,6 +236,32 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
     # intialize early exit tracker
     early_exit = False
 
+    trigger_time_dt = datetime.strptime(trigger_time, "%H:%M:%S")
+    target_tz = pytz.timezone(trigger_time_zone)
+
+    # Get the current date in Target Time
+    current_date_target = datetime.now(target_tz).date()
+
+    # Combine the current date with the target time to create a datetime object
+    target_datetime = datetime.combine(current_date_target, trigger_time_dt.time())
+
+    # Localize the target datetime to Time Time
+    target_datetime_local = target_tz.localize(target_datetime)
+
+    # Get the current time in Target Time
+    current_time_target = datetime.now(target_tz)
+    print(f"Current time in Target Time: {current_time_target}")
+    checkin_time = current_time_target + timedelta(seconds=15)
+    while current_time_target < target_datetime_local:
+        # Get the current time in Target Time
+        current_time_target = datetime.now(target_tz)
+        if checkin_time >= current_time_target:
+            print("Still waiting for the trigger time")
+            print(f"Current time in Target Time: {current_time_target}")
+
+        sleep(0.1)
+
+    print("Starting the search!")
     time_now = time()
     time_end = time_now + max_time
     while time_now < time_end:
@@ -209,6 +275,8 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
 
         if num_clicks > 0:
             print("Went through all the dates, going back to the first date")
+            # sleep a bit to reduce load on server
+            sleep(15 + random.expovariate(1. / 5))
             prev_page_selector = "#per-availability-main > div > div.sarsa-box > div.sarsa-stack.md > div > div:nth-child(2) > div > div > button:nth-child(1)"
             try:
                 prev_page = driver.find_element(By.CSS_SELECTOR, prev_page_selector)
@@ -229,6 +297,9 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
         # reset the current date
         current_date = start_date
 
+        # update the time
+        time_now = time()
+        # go outwards from center
         while current_date <= end_date:
             driver.get(f"https://www.recreation.gov/permits/{config['permit_id']}/registration/detailed-availability?date={current_date.strftime(time_format)}")
 
@@ -250,7 +321,7 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
                 cell_xpath = config["date_xpath_selector"].format(cell_col=cell_col)
                 use_selector = False
                 try:
-                    WebDriverWait(driver, 5).until(
+                    WebDriverWait(driver, 20).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, cell_selector))
                     )
                     use_selector = True
@@ -261,6 +332,11 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
                         )
                     except:
                         print("Timed out waiting for calendar page to load.")
+                        s3 = boto3.client('s3')
+                        fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_calendar_screenshot.png"
+                        driver.save_screenshot("/tmp/" + fname)
+                        s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
+
                         num_timeouts += 1
                         continue
                 # Find the cell for the reservation date
@@ -299,6 +375,10 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
                     found_bookings = True
                 except:
                     print("Timed out waiting for booking page to load.")
+                    s3 = boto3.client('s3')
+                    fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_booking_page_screenshot.png"
+                    driver.save_screenshot("/tmp/" + fname)
+                    s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
                     error_field_text = None
                     try:
                         error_field = driver.find_element(By.CSS_SELECTOR, BAD_FINGRPRINT_CSS_SELECTOR)
@@ -323,6 +403,9 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
             # so we need to jump to the next 10 dates
             current_date = current_date + timedelta(days=10)
 
+            # don't need to go to next page if date range is less than 10 days
+            if end_date - start_date < timedelta(days=10):
+                continue
             # GO TO THE NEXT PAGE TWICE TO GET FRESH IDS
             next_page_css_selector = "#per-availability-main > div > div.sarsa-box > div.sarsa-stack.md > div > div:nth-child(2) > div > div > button.sarsa-button.ml-1.mr-2.sarsa-button-link.sarsa-button-xs"
 
@@ -332,6 +415,10 @@ def get_booking_started(start_date, end_date, email, password, config_key=None, 
                 )
             except:
                 print("Timed out waiting for next page to load.")
+                s3 = boto3.client('s3')
+                fname = datetime.now().strftime("%Y%m%d%H%M%S") + "_next_page_screenshot.png"
+                driver.save_screenshot("/tmp/" + fname)
+                s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
                 num_timeouts += 1
                 break
 
@@ -354,4 +441,12 @@ if __name__ == "__main__":
     email = os.environ.get("REC_EMAIL")
     password = os.environ.get("REC_PASSWORD")
     config_key = "desolation"
-    get_booking_started("2024-02-26", "2024-03-20", email, password, config_key)
+    get_booking_started(
+        "2024-03-08",
+        "2024-03-16",
+        email,
+        password,
+        config_key,
+        trigger_time="01:26:00",
+        trigger_time_zone="America/Denver",
+        )
