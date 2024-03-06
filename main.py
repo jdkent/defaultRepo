@@ -255,9 +255,10 @@ def get_booking_started(
     while current_time_target < target_datetime_local:
         # Get the current time in Target Time
         current_time_target = datetime.now(target_tz)
-        if checkin_time >= current_time_target:
+        if checkin_time <= current_time_target:
             print("Still waiting for the trigger time")
             print(f"Current time in Target Time: {current_time_target}")
+            checkin_time = checkin_time + timedelta(seconds=15)
 
         sleep(0.1)
 
