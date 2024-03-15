@@ -126,7 +126,7 @@ def get_booking_started(
     # disable sandbox mode
     options.add_argument('--no-sandbox')
     # disable cache (did not help with 429)
-    # options.add_argument('--disable-cache')
+    options.add_argument('--disable-cache')
 
     # disable shared memory usage
     options.add_argument('--disable-dev-shm-usage')
@@ -181,9 +181,14 @@ def get_booking_started(
         s3.upload_file("/tmp/" + fname, BUCKET_NAME, fname)
         driver.quit()
         return False, True
-
     login_button = driver.find_element(By.ID, "ga-global-nav-log-in-link")
-    login_button.click()
+    try:
+        login_button.click()
+    except:
+        # old browser warning
+        out_of_date_button = driver.find_element(By.ID, "buorgig")
+        out_of_date_button.click()
+        login_button.click()
 
     try:
         WebDriverWait(driver, 5).until(
@@ -444,10 +449,10 @@ if __name__ == "__main__":
     config_key = "desolation"
     get_booking_started(
         "2024-03-08",
-        "2024-03-16",
+        "2024-03-28",
         email,
         password,
         config_key,
-        trigger_time="01:26:00",
+        trigger_time="01:51:00",
         trigger_time_zone="America/Denver",
         )
