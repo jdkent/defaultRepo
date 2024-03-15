@@ -299,7 +299,7 @@ def get_booking_started(
             for _ in range(num_clicks):
                 try:
                     prev_page.click()
-                    sleep(0.1 + random.expovariate(1. / 0.2))
+                    sleep(0.1 + random.expovariate(1. / 0.02))
                 except:
                     print("Could not click the previous page button, restarting the browser")
                     early_exit = True
@@ -437,10 +437,10 @@ def get_booking_started(
             next_page = driver.find_element(By.CSS_SELECTOR, next_page_css_selector)
             next_page.click()
             num_clicks += 1
-            sleep(0.2 + random.expovariate(1. / 0.5))
+            sleep(0.2 + random.expovariate(1. / 0.05))
             next_page.click()
             num_clicks += 1
-            sleep(0.1 + random.expovariate(1. / 0.5))
+            sleep(0.1 + random.expovariate(1. / 0.05))
 
     # Close the browser
     driver.quit()
@@ -454,8 +454,8 @@ if __name__ == "__main__":
     password = os.environ.get("REC_PASSWORD")
     config_key = "salmon-middle-fork"
     get_booking_started(
-        "2024-03-08",
-        "2024-03-28",
+        "2024-06-08",
+        "2024-06-28",
         email,
         password,
         config_key,
