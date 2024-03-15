@@ -31,10 +31,12 @@ Then open another terminal and run the following command:
 
 ```bash
 curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{ 
-  "start_date": "2024-06-25",
-  "end_date": "2024-07-15",
-  "config": "desolation",
-  "max_time": 500
+  "start_date": "2024-06-23",
+  "end_date": "2024-06-25",
+  "config": "dinosaur",
+  "max_time": 500,
+  "trigger_time": "08:00:00",
+  "trigger_time_zone": "America/Denver"
 }'
 ```
 

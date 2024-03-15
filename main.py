@@ -38,7 +38,13 @@ CONFIGS = {
         "min_date_col": 2,
         "dates": "2024-06-23-24-25",
     },
-    "salmon-middle-fork": "2024-06-23/24/25",
+    "salmon-middle-fork": {
+        "permit_id": "234623",
+        "date_css_selector": "#per-availability-main > div > div.sarsa-box > div.per-availability-table-container > div.rec-grid-grid.detailed-availability-grid-new > div:nth-child(2) > div > div:nth-child({cell_col}) > div > button",
+        "date_xpath_selector": "/html/body/div[1]/div/div[4]/div/div/div[1]/div/div[4]/div[3]/div[2]/div[2]/div/div[{cell_col}]/div/button",
+        "min_date_col": 2,
+        "dates": "2024-06-23/24/25",
+    }
 }
 
 BUCKET_NAME = "debucketforpng"
@@ -446,7 +452,7 @@ def get_booking_started(
 if __name__ == "__main__":
     email = os.environ.get("REC_EMAIL")
     password = os.environ.get("REC_PASSWORD")
-    config_key = "desolation"
+    config_key = "salmon-middle-fork"
     get_booking_started(
         "2024-03-08",
         "2024-03-28",
